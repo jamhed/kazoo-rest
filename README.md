@@ -29,7 +29,8 @@ Install
 
 ```sh
 cpanm Furl JSON
-testbed.pl
+./make-test-setup.pl
+./enable-all-apps.pl
 ```
 
 
