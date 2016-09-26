@@ -29,8 +29,8 @@ Install
 
 ```sh
 cpanm Furl JSON
+
+export PERLLIB=./
 ./make-test-setup.pl
 ./enable-all-apps.pl
 ```
-
-
