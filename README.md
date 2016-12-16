@@ -32,6 +32,7 @@ cpanm Furl JSON
 
 export PERLLIB=./
 export SERVER=http://kazoo.kazoo:8000
+export KZAUTH=login:password:account
 ./make-test-setup.pl
 ./enable-all-apps.pl
 ```

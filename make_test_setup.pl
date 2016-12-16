@@ -6,7 +6,7 @@ use KZ;
 # display json replies or not
 $KZ::verbose = 1;
 
-my $auth = login "admin", "admin", "admin";
+my $auth = login();
 
 make_std_account($auth, "cc1.kazoo", "1");
 make_std_account($auth, "cc2.kazoo", "2");

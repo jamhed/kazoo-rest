@@ -26,6 +26,15 @@ use Exporter 'import';
 	add_spare_number
 	add_spare_number_with_cnam
 	update_callflow
+	notifications
+	notifications_param
+	account
+	api_auth
+	makebusy
+	cdrs
+	cdrs_interaction
+	cdrs_from
+	GREG
 );
 use strict;
 use warnings;
@@ -36,14 +45,21 @@ use Digest::MD5 qw(md5_hex);
 use IO::Socket::SSL;
 use URI::Escape qw(uri_escape);
 
+sub GREG ($) { 62167219200+shift };
+
 our $verbose = 0;
 our $furl = Furl->new(
 	ssl_opts => {
 		SSL_verify_mode => SSL_VERIFY_NONE, # SSL_VERIFY_PEER(),
+		timeout => 60
 	});
 
 sub host { $ENV{SERVER} || "http://localhost:8000" }
-sub uri ($) { sprintf("%s/%s", host, shift) }
+sub uri ($) {
+	my $uri = sprintf("%s/%s", host, shift);
+	print "uri: $uri\n" if $verbose;
+	return $uri;
+}
 sub token ($) { shift->{auth_token} }
 sub id ($) { shift->{id} }
 sub name ($) { shift->{name} }
@@ -51,7 +67,7 @@ sub account_id ($) { shift->{account_id} }
 
 sub headers (;$$) {
 	my ($auth, $common) = @_;
-	$common //= ["Accept" => "application/json", "Content-Type" => "application/json"];
+	$common = ["Accept" => "application/json", "Content-Type" => "application/json"] unless $common;
 	$auth? [ "X-Auth-Token" => $auth, @$common ] : $common;
 }
 
@@ -75,8 +91,17 @@ sub verbose ($) {
 	return $verbose? dump_json($obj) : $obj;
 }
 
-sub login ($$$) {
+sub parse_env {
+	if ($ENV{KZAUTH}) {
+		return split /:/, $ENV{KZAUTH};
+	} else {
+		die "please specify KZAUTH env variable in format: login:password:account_name";
+	}
+}
+
+sub login {
 	my ($name, $password, $account) = @_;
+	($name, $password, $account) = parse_env() unless $account;
 	my $auth = md5_hex("$name:$password");
 	my $data = <<DATA;
 {
@@ -138,7 +163,7 @@ sub make_device ($$$$) {
 	}
 }
 DATA
-  	my $re = parse_reply $furl->put(uri "v2/accounts/$account_id/devices", headers($auth), $data);
+	my $re = parse_reply $furl->put(uri "v2/accounts/$account_id/devices", headers($auth), $data);
 	verbose $re->{data};
 }
 
@@ -152,19 +177,19 @@ sub make_conference ($$$$) {
 	}
 } 
 DATA
-  	my $re = parse_reply $furl->put(uri "v2/accounts/$account_id/conferences", headers($auth), $data);
+	my $re = parse_reply $furl->put(uri "v2/accounts/$account_id/conferences", headers($auth), $data);
 	verbose $re->{data};
 }
 
 sub get_conferences ($$) {
 	my ($auth, $account_id) = @_;
-  	my $re = parse_reply $furl->get(uri "v2/accounts/$account_id/conferences", headers($auth));
+	my $re = parse_reply $furl->get(uri "v2/accounts/$account_id/conferences", headers($auth));
 	verbose $re->{data};
 }
 
 sub get_participants ($$$) {
 	my ($auth, $account_id, $conf_id) = @_;
-  	my $re = parse_reply $furl->get(uri "v2/accounts/$account_id/conferences/$conf_id/participants", headers($auth));
+	my $re = parse_reply $furl->get(uri "v2/accounts/$account_id/conferences/$conf_id/participants", headers($auth));
 	verbose $re->{data};
 }
 
@@ -183,7 +208,7 @@ sub make_callflow_conference ($$$$) {
 	}
 }
 DATA
-  	my $re = parse_reply $furl->put(uri "v2/accounts/$account_id/callflows", headers($auth), $data);
+	my $re = parse_reply $furl->put(uri "v2/accounts/$account_id/callflows", headers($auth), $data);
 	verbose $re->{data};
 }
 
@@ -204,7 +229,7 @@ sub make_callflow_user ($$$$) {
 	}
 }
 DATA
-  	my $re = parse_reply $furl->put(uri "v2/accounts/$account_id/callflows", headers($auth), $data);
+	my $re = parse_reply $furl->put(uri "v2/accounts/$account_id/callflows", headers($auth), $data);
 	verbose $re->{data};
 }
 
@@ -275,7 +300,7 @@ sub make_group ($$$) {
 	}
 }
 DATA
-  	my $re = parse_reply $furl->put(uri "v2/accounts/$account_id/groups", headers($auth), $data);
+	my $re = parse_reply $furl->put(uri "v2/accounts/$account_id/groups", headers($auth), $data);
 	verbose $re->{data};
 }
 
@@ -342,8 +367,65 @@ sub update_callflow ($$$) {
 	my ($auth, $account_id, $cf) = @_;
 	my $callflow_id = $cf->{id};
 	my $data = to_json({ data => $cf });
-  	my $re = parse_reply $furl->post(uri "v2/accounts/$account_id/callflows/$callflow_id", headers($auth), $data);
+	my $re = parse_reply $furl->post(uri "v2/accounts/$account_id/callflows/$callflow_id", headers($auth), $data);
 	verbose $re->{data};
+}
+
+sub notifications {
+	my ($auth, $account_id, $start_key, $page) = @_;
+	my $sk = $start_key ? "start_key=$start_key" : undef;
+	my $sp = $page ? "page_size=$page" : undef;
+	my $params = join("&", grep { defined $_ } ($sk, $sp)) || "";
+	my $re = parse_reply $furl->get(
+		uri "v2/accounts/$account_id/notifications/smtplog?$params", headers($auth)
+	);
+	verbose $re;
+}
+
+sub notifications_param {
+	my ($auth, $account_id, $start_key, $page, %param) = @_;
+	my $sk = $start_key ? "start_key=$start_key" : undef;
+	my $sp = $page ? "page_size=$page" : undef;
+	my $params = join("&", grep { defined $_ } ($sk, $sp)) || "";
+	my $re = parse_reply $furl->get(
+		uri "v2/accounts/$account_id/notifications/smtplog?has_key=template_id&$params", headers($auth)
+	);
+	verbose $re;
+}
+
+sub makebusy {
+	my ($auth, $account_id) = @_;
+	$furl->get( uri "v2/resources?filter_makebusyresource=true", headers($auth) );
+}
+
+sub account ($$) {
+	my ($auth, $account_id) = @_;
+	parse_reply $furl->get( uri "v2/accounts/$account_id", headers($auth) );
+}
+
+sub api_auth ($$) {
+	my ($auth, $account_id) = @_;
+	parse_reply $furl->put( uri "v2/accounts/$account_id/api_auth", headers($auth) );
+}
+
+sub cdrs ($$) {
+	my ($auth, $account_id) = @_;
+	my $re = parse_reply $furl->get(uri "v2/accounts/$account_id/cdrs", headers($auth));
+	verbose $re->{data};
+}
+
+sub cdrs_interaction ($$) {
+	my ($auth, $account_id) = @_;
+	my $re = parse_reply $furl->get(uri "v2/accounts/$account_id/cdrs/interaction", headers($auth));
+	verbose $re->{data};
+}
+
+
+sub cdrs_from {
+	my ($auth, $account_id, $created_from, $start_key) = @_;
+	my $sk = defined $start_key? "&start_key=$start_key" : "";
+	my $re = parse_reply $furl->get(uri "v2/accounts/$account_id/cdrs/interaction?created_from=$created_from$sk", headers($auth));
+	verbose $re;
 }
 
 1;
